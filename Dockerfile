@@ -1,7 +1,5 @@
 FROM php:8.3-apache-bookworm
 
-ENV APACHE_DOCUMENT_ROOT=/var/www/html
-
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         ca-certificates \
