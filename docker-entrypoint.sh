@@ -6,7 +6,7 @@ APP_DIR="/var/www/html"
 SEED_DIR="/opt/suitecrm"
 
 echo "=========================================="
-echo "SUITECRM ENTRYPOINT V6"
+echo "SUITECRM ENTRYPOINT V7"
 echo "BUILD SOURCE: vamos-automatizar/suitecrm-railway"
 echo "DATE: 2026-09-08"
 echo "=========================================="
@@ -23,16 +23,16 @@ echo "[suitecrm] Cleaning Apache MPM configuration..."
 rm -f /etc/apache2/mods-enabled/mpm_*.load
 rm -f /etc/apache2/mods-enabled/mpm_*.conf
 
-# Disable possible MPM modules registered by a2enmod.
+# Disable possible MPM modules.
 a2dismod mpm_event 2>/dev/null || true
 a2dismod mpm_worker 2>/dev/null || true
 a2dismod mpm_prefork 2>/dev/null || true
 
-# Remove them again to guarantee that no MPM is left enabled.
+# Remove them again to guarantee a clean state.
 rm -f /etc/apache2/mods-enabled/mpm_*.load
 rm -f /etc/apache2/mods-enabled/mpm_*.conf
 
-# Enable ONLY prefork.
+# SuiteCRM with mod_php requires prefork.
 a2enmod mpm_prefork
 
 echo "[suitecrm] Enabled Apache MPM:"
@@ -51,12 +51,8 @@ mkdir -p "${APP_DIR}"
 
 echo "[suitecrm] Checking SuiteCRM application files..."
 
-# The marker is intentionally NOT used here.
-#
-# The real test is index.php.
-#
-# This protects against a persistent volume that contains
-# the old marker but does not contain the SuiteCRM application.
+# Do not rely on a marker file.
+# The real validation is the presence of index.php.
 
 if [[ ! -f "${APP_DIR}/index.php" ]]; then
 
@@ -73,7 +69,7 @@ if [[ ! -f "${APP_DIR}/index.php" ]]; then
 
     else
 
-        echo "[suitecrm] ERROR: SuiteCRM image source is missing!"
+        echo "[suitecrm] ERROR: SuiteCRM image source is missing."
         echo "[suitecrm] Expected file:"
         echo "           ${SEED_DIR}/index.php"
 
@@ -95,7 +91,7 @@ fi
 
 if [[ ! -f "${APP_DIR}/index.php" ]]; then
 
-    echo "[suitecrm] ERROR: index.php is still missing!"
+    echo "[suitecrm] ERROR: index.php is still missing."
     echo "[suitecrm] SuiteCRM cannot start."
 
     exit 1
@@ -105,49 +101,77 @@ fi
 echo "[suitecrm] SuiteCRM index.php detected."
 
 # ------------------------------------------------------------
-# 4. PERMISSIONS
+# 4. TEMP DIRECTORY
+# ------------------------------------------------------------
+
+echo "[suitecrm] Checking PHP temporary directory..."
+
+mkdir -p /tmp
+
+# Standard permissions for a shared temporary directory.
+chmod 1777 /tmp
+
+echo "[suitecrm] /tmp permissions:"
+ls -ld /tmp
+
+# ------------------------------------------------------------
+# 5. FILE OWNERSHIP AND PERMISSIONS
 # ------------------------------------------------------------
 
 echo "[suitecrm] Fixing permissions..."
 
-# General ownership.
+# SuiteCRM must be owned by the Apache/PHP user.
 chown -R www-data:www-data "${APP_DIR}"
 
-# General permissions.
-chmod -R 755 "${APP_DIR}"
+# Default permissions:
+# directories = 755
+# files       = 644
 
-# SuiteCRM writable directories.
+find "${APP_DIR}" -type d -exec chmod 755 {} \;
+find "${APP_DIR}" -type f -exec chmod 644 {} \;
+
+# SuiteCRM runtime directories must be writable.
+#
+# These directories are used for cache generation,
+# customizations, uploads, metadata, and runtime files.
+
 for DIR in \
     cache \
     custom \
+    modules \
+    themes \
     data \
     upload
 do
 
     if [[ -d "${APP_DIR}/${DIR}" ]]; then
 
+        echo "[suitecrm] Configuring writable directory: ${DIR}"
+
+        chown -R www-data:www-data "${APP_DIR}/${DIR}"
         chmod -R 775 "${APP_DIR}/${DIR}"
+
+    else
+
+        echo "[suitecrm] WARNING: directory not found: ${DIR}"
 
     fi
 
 done
 
 # ------------------------------------------------------------
-# 5. CONFIGURATION FILE
+# 6. CONFIGURATION FILE
 # ------------------------------------------------------------
 
-# Do NOT create config.php automatically.
-#
-# SuiteCRM's installer creates it when necessary.
-#
-# If it already exists, make sure Apache/PHP can update it.
+# Do not create config.php automatically.
+# SuiteCRM installer creates it when required.
 
 if [[ -f "${APP_DIR}/config.php" ]]; then
 
+    echo "[suitecrm] Existing config.php detected."
+
     chown www-data:www-data "${APP_DIR}/config.php"
     chmod 664 "${APP_DIR}/config.php"
-
-    echo "[suitecrm] Existing config.php detected."
 
 else
 
@@ -157,7 +181,76 @@ else
 fi
 
 # ------------------------------------------------------------
-# 6. SUITECRM CRON
+# 7. CACHE DIRECTORY VALIDATION
+# ------------------------------------------------------------
+
+echo "[suitecrm] Validating SuiteCRM cache directory..."
+
+mkdir -p "${APP_DIR}/cache"
+
+chown -R www-data:www-data "${APP_DIR}/cache"
+
+chmod -R 775 "${APP_DIR}/cache"
+
+# Test write access as the actual Apache/PHP user.
+CACHE_TEST_DIR="${APP_DIR}/cache/.railway-write-test"
+
+rm -rf "${CACHE_TEST_DIR}"
+
+if su -s /bin/sh www-data -c \
+    "mkdir -p '${CACHE_TEST_DIR}' && touch '${CACHE_TEST_DIR}/test.php'"
+then
+
+    echo "[suitecrm] Cache write test: OK"
+
+    rm -rf "${CACHE_TEST_DIR}"
+
+else
+
+    echo "[suitecrm] ERROR: SuiteCRM cache is not writable by www-data."
+
+    rm -rf "${CACHE_TEST_DIR}"
+
+    exit 1
+
+fi
+
+# ------------------------------------------------------------
+# 8. TEST SUITECRM CACHE MODULE DIRECTORY
+# ------------------------------------------------------------
+
+echo "[suitecrm] Validating cache/modules directory..."
+
+mkdir -p "${APP_DIR}/cache/modules"
+
+chown -R www-data:www-data "${APP_DIR}/cache/modules"
+
+chmod -R 775 "${APP_DIR}/cache/modules"
+
+CACHE_MODULE_TEST_DIR="${APP_DIR}/cache/modules/.railway-write-test"
+
+rm -rf "${CACHE_MODULE_TEST_DIR}"
+
+if su -s /bin/sh www-data -c \
+    "mkdir -p '${CACHE_MODULE_TEST_DIR}' && touch '${CACHE_MODULE_TEST_DIR}/test.php'"
+then
+
+    echo "[suitecrm] Cache modules write test: OK"
+
+    rm -rf "${CACHE_MODULE_TEST_DIR}"
+
+else
+
+    echo "[suitecrm] ERROR: cache/modules is not writable by www-data."
+
+    rm -rf "${CACHE_MODULE_TEST_DIR}"
+
+    exit 1
+
+fi
+
+# ------------------------------------------------------------
+# 9. SUITECRM CRON
 # ------------------------------------------------------------
 
 echo "[suitecrm] Starting SuiteCRM scheduler..."
@@ -166,6 +259,8 @@ if [[ -x "/usr/local/bin/suitecrm-cron.sh" ]]; then
 
     /usr/local/bin/suitecrm-cron.sh &
 
+    echo "[suitecrm] SuiteCRM scheduler started."
+
 else
 
     echo "[suitecrm] WARNING: suitecrm-cron.sh not found."
@@ -173,7 +268,7 @@ else
 fi
 
 # ------------------------------------------------------------
-# 7. APACHE VALIDATION
+# 10. APACHE CONFIGURATION VALIDATION
 # ------------------------------------------------------------
 
 echo "[suitecrm] Validating Apache configuration..."
@@ -187,23 +282,36 @@ apache2ctl -M 2>&1 \
     || true
 
 # ------------------------------------------------------------
-# 8. SUITECRM FILE CHECK
+# 11. FINAL SUITECRM VALIDATION
 # ------------------------------------------------------------
 
-echo "[suitecrm] SuiteCRM files:"
+echo "[suitecrm] Final SuiteCRM validation..."
 
-ls -lah \
-    "${APP_DIR}/index.php" \
-    2>/dev/null || true
+echo "[suitecrm] Application root:"
+ls -ld "${APP_DIR}"
+
+echo "[suitecrm] index.php:"
+ls -lah "${APP_DIR}/index.php"
 
 if [[ -f "${APP_DIR}/config.php" ]]; then
 
+    echo "[suitecrm] config.php:"
     ls -lah "${APP_DIR}/config.php"
+
+else
+
+    echo "[suitecrm] config.php: not created yet"
 
 fi
 
+echo "[suitecrm] cache:"
+ls -ld "${APP_DIR}/cache"
+
+echo "[suitecrm] cache/modules:"
+ls -ld "${APP_DIR}/cache/modules"
+
 # ------------------------------------------------------------
-# 9. START APACHE
+# 12. START APACHE
 # ------------------------------------------------------------
 
 echo "[suitecrm] Starting Apache..."
