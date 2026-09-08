@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libcurl4-openssl-dev \
         libc-client2007e-dev \
         libkrb5-dev \
+        libonig-dev \
     && docker-php-ext-configure gd \
         --with-freetype \
         --with-jpeg \
