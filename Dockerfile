@@ -2,14 +2,15 @@ FROM php:8.3-apache-bookworm
 
 ARG SUITECRM_VERSION=7.15.2
 
-ENV DEBIAN_FRONTEND=noninteractive \
-    APACHE_DOCUMENT_ROOT=/var/www/html
+ENV DEBIAN_FRONTEND=noninteractive
+ENV APACHE_DOCUMENT_ROOT=/var/www/html
 
-# ============================================================
-# System dependencies and PHP extensions
-# ============================================================
+# ------------------------------------------------------------
+# System dependencies + PHP extensions
+# ------------------------------------------------------------
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
         cron \
@@ -46,47 +47,51 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         xml \
         zip \
     \
-    # ========================================================
+    # --------------------------------------------------------
     # Apache MPM
-    # ========================================================
+    # SuiteCRM + mod_php require prefork.
+    # Remove every MPM and enable only prefork.
+    # --------------------------------------------------------
+    && rm -f /etc/apache2/mods-enabled/mpm_*.load \
+              /etc/apache2/mods-enabled/mpm_*.conf \
+    \
     && a2dismod mpm_event 2>/dev/null || true \
     && a2dismod mpm_worker 2>/dev/null || true \
     && a2dismod mpm_prefork 2>/dev/null || true \
     \
-    # Remove possible MPM module configuration files explicitly.
-    && rm -f /etc/apache2/mods-enabled/mpm_event.conf \
-            /etc/apache2/mods-enabled/mpm_event.load \
-            /etc/apache2/mods-enabled/mpm_worker.conf \
-            /etc/apache2/mods-enabled/mpm_worker.load \
-            /etc/apache2/mods-enabled/mpm_prefork.conf \
-            /etc/apache2/mods-enabled/mpm_prefork.load \
+    && rm -f /etc/apache2/mods-enabled/mpm_*.load \
+              /etc/apache2/mods-enabled/mpm_*.conf \
     \
-    # Enable exactly one MPM.
     && a2enmod mpm_prefork \
-    \
-    # SuiteCRM Apache modules.
     && a2enmod rewrite \
-        headers \
-        expires \
+    && a2enmod headers \
+    && a2enmod expires \
     \
+    # --------------------------------------------------------
+    # Apache configuration
+    # --------------------------------------------------------
     && echo 'ServerName localhost' \
         > /etc/apache2/conf-available/servername.conf \
+    \
     && a2enconf servername \
     \
-    # Railway HTTP port.
-    && printf 'Listen 8080\n' > /etc/apache2/ports.conf \
+    && printf 'Listen 8080\n' \
+        > /etc/apache2/ports.conf \
     \
+    # --------------------------------------------------------
+    # Cleanup
+    # --------------------------------------------------------
     && rm -rf /var/lib/apt/lists/*
 
-# ============================================================
+# ------------------------------------------------------------
 # Composer
-# ============================================================
+# ------------------------------------------------------------
 
 COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
 
-# ============================================================
-# Download official SuiteCRM source
-# ============================================================
+# ------------------------------------------------------------
+# SuiteCRM source
+# ------------------------------------------------------------
 
 WORKDIR /opt
 
@@ -104,61 +109,65 @@ RUN curl -fsSL \
     \
     && cd /opt/suitecrm \
     \
-    && COMPOSER_ALLOW_SUPERUSER=1 composer install \
+    && COMPOSER_ALLOW_SUPERUSER=1 \
+        composer install \
         --no-dev \
         --no-interaction \
         --prefer-dist \
         --optimize-autoloader \
     \
-    && rm -rf \
-        /opt/suitecrm/.git \
-        /opt/suitecrm/tests
+    && rm -rf /opt/suitecrm/.git \
+              /opt/suitecrm/tests
 
-# ============================================================
-# Configuration files
-# ============================================================
+# ------------------------------------------------------------
+# PHP configuration
+# ------------------------------------------------------------
 
-COPY php.ini \
-    /usr/local/etc/php/conf.d/99-suitecrm.ini
+COPY php.ini /usr/local/etc/php/conf.d/99-suitecrm.ini
 
-COPY apache-vhost.conf \
-    /etc/apache2/sites-available/000-default.conf
+# ------------------------------------------------------------
+# Apache VirtualHost
+# ------------------------------------------------------------
 
-COPY docker-entrypoint.sh \
-    /usr/local/bin/docker-entrypoint.sh
+COPY apache-vhost.conf /etc/apache2/sites-available/000-default.conf
 
-COPY suitecrm-cron.sh \
-    /usr/local/bin/suitecrm-cron.sh
+# ------------------------------------------------------------
+# Entrypoint + Scheduler
+# ------------------------------------------------------------
+
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY suitecrm-cron.sh /usr/local/bin/suitecrm-cron.sh
 
 RUN chmod +x \
         /usr/local/bin/docker-entrypoint.sh \
         /usr/local/bin/suitecrm-cron.sh
 
-# ============================================================
-# Apache validation
-# ============================================================
-
-RUN echo "============================================" \
-    && echo "SuiteCRM version: ${SUITECRM_VERSION}" \
-    && echo "PHP version:" \
-    && php -v \
-    && echo "Enabled Apache MPM modules:" \
-    && apache2ctl -M 2>&1 | grep -E 'mpm_(event|worker|prefork)_module' || true \
-    && echo "Apache configuration test:" \
-    && apache2ctl -t \
-    && echo "============================================"
-
-# ============================================================
-# Application
-# ============================================================
+# ------------------------------------------------------------
+# Runtime
+# ------------------------------------------------------------
 
 WORKDIR /var/www/html
 
 EXPOSE 8080
 
-# ============================================================
+# ------------------------------------------------------------
+# Build-time Apache validation
+# ------------------------------------------------------------
+
+RUN echo "=== Apache MPM configuration ===" \
+    && find /etc/apache2/mods-enabled \
+        -maxdepth 1 \
+        -type l \
+        \( -name 'mpm_*.load' -o -name 'mpm_*.conf' \) \
+        -printf '%f -> %l\n' \
+    && apache2ctl -M 2>&1 \
+        | grep -E 'mpm_(event|worker|prefork)_module' \
+    && echo "=== Apache configuration test ===" \
+    && apache2ctl -t
+
+# ------------------------------------------------------------
 # Healthcheck
-# ============================================================
+# ------------------------------------------------------------
 
 HEALTHCHECK \
     --interval=30s \
@@ -169,9 +178,9 @@ HEALTHCHECK \
         http://127.0.0.1:8080/index.php \
         >/dev/null || exit 1
 
-# ============================================================
+# ------------------------------------------------------------
 # Startup
-# ============================================================
+# ------------------------------------------------------------
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
