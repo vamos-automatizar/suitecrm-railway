@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 APP_DIR=/var/www/html
 SEED_DIR=/opt/suitecrm
-MARKER="$APP_DIR/.suitecrm-seeded-${SUITECRM_VERSION}"
+MARKER="$APP_DIR/.suitecrm-seeded"
 
 mkdir -p "$APP_DIR"
 
