@@ -1,45 +1,67 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-APP_DIR=/var/www/html
-SEED_DIR=/opt/suitecrm
-MARKER="$APP_DIR/.suitecrm-seeded"
+APP_DIR="/var/www/html"
+SEED_DIR="/opt/suitecrm"
+MARKER="${APP_DIR}/.suitecrm-seeded"
 
-mkdir -p "$APP_DIR"
+echo "[suitecrm] Entrypoint started."
 
-# The Railway volume is mounted over /var/www/html and hides files baked into the image.
-# Seed the volume only on its first initialization.
-if [[ ! -f "$MARKER" ]]; then
-    if [[ -f "$APP_DIR/suitecrm_version.php" ]]; then
-        echo "[suitecrm] Existing SuiteCRM files detected; preserving persistent volume."
+mkdir -p "${APP_DIR}"
+
+# Railway mounts the persistent volume over /var/www/html.
+# On the first startup, copy the application from the image
+# into the persistent volume.
+if [[ ! -f "${MARKER}" ]]; then
+
+    echo "[suitecrm] First initialization detected."
+
+    if [[ -n "$(ls -A "${APP_DIR}" 2>/dev/null)" ]]; then
+        echo "[suitecrm] Persistent volume is not empty."
     else
-        echo "[suitecrm] Initializing persistent application volume..."
-        cp -a "$SEED_DIR/." "$APP_DIR/"
+        echo "[suitecrm] Copying SuiteCRM files to persistent volume..."
+        cp -a "${SEED_DIR}/." "${APP_DIR}/"
     fi
 
-    touch "$MARKER"
+    touch "${MARKER}"
+
+else
+    echo "[suitecrm] Existing SuiteCRM installation detected."
 fi
 
-# SuiteCRM requires the web server to be able to write to these paths.
-chown -R www-data:www-data "$APP_DIR"
+# Ensure SuiteCRM can write to the directories required
+# by the application and installer.
+chown -R www-data:www-data "${APP_DIR}"
 
-chmod -R 755 "$APP_DIR"
+chmod -R 755 "${APP_DIR}"
 
-chmod -R 775 \
-    "$APP_DIR/cache" \
-    "$APP_DIR/custom" \
-    "$APP_DIR/modules" \
-    "$APP_DIR/themes" \
-    "$APP_DIR/data" \
-    "$APP_DIR/upload" 2>/dev/null || true
+for DIR in \
+    cache \
+    custom \
+    modules \
+    themes \
+    data \
+    upload
+do
+    if [[ -d "${APP_DIR}/${DIR}" ]]; then
+        chmod -R 775 "${APP_DIR}/${DIR}"
+    fi
+done
 
-# The official installer creates/updates config.php.
-touch "$APP_DIR/config.php"
+# config.php is created/updated by the SuiteCRM installer.
+if [[ ! -f "${APP_DIR}/config.php" ]]; then
+    touch "${APP_DIR}/config.php"
+fi
 
-chown www-data:www-data "$APP_DIR/config.php"
-chmod 664 "$APP_DIR/config.php"
+chown www-data:www-data "${APP_DIR}/config.php"
+chmod 664 "${APP_DIR}/config.php"
 
-# Run SuiteCRM cron every minute in the background.
-/usr/local/bin/suitecrm-cron.sh &
+echo "[suitecrm] Starting SuiteCRM scheduler..."
+
+if [[ -x "/usr/local/bin/suitecrm-cron.sh" ]]; then
+    /usr/local/bin/suitecrm-cron.sh &
+fi
+
+echo "[suitecrm] Starting Apache..."
 
 exec "$@"
