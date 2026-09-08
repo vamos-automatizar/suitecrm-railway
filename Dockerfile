@@ -1,5 +1,10 @@
 FROM php:8.3-apache-bookworm
 
+ARG SUITECRM_VERSION=7.15.2
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    APACHE_DOCUMENT_ROOT=/var/www/html
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         ca-certificates \
@@ -41,7 +46,7 @@ COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
 WORKDIR /opt
 
 RUN curl -fsSL \
-        "https://github.com/SuiteCRM/SuiteCRM/archive/refs/tags/v7.15.2.tar.gz" \
+        "https://github.com/SuiteCRM/SuiteCRM/archive/refs/tags/v${SUITECRM_VERSION}.tar.gz" \
         -o /tmp/suitecrm.tar.gz \
     && mkdir -p /opt/suitecrm \
     && tar -xzf /tmp/suitecrm.tar.gz \
@@ -49,27 +54,33 @@ RUN curl -fsSL \
         -C /opt/suitecrm \
     && rm -f /tmp/suitecrm.tar.gz \
     && cd /opt/suitecrm \
-    && composer install \
+    && COMPOSER_ALLOW_SUPERUSER=1 composer install \
         --no-dev \
         --no-interaction \
         --prefer-dist \
         --optimize-autoloader \
     && rm -rf /opt/suitecrm/.git /opt/suitecrm/tests
 
-COPY apache-vhost.conf /etc/apache2/sites-available/000-default.conf
 COPY php.ini /usr/local/etc/php/conf.d/99-suitecrm.ini
+COPY apache-vhost.conf /etc/apache2/sites-available/000-default.conf
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY suitecrm-cron.sh /usr/local/bin/suitecrm-cron.sh
 
 RUN chmod +x \
         /usr/local/bin/docker-entrypoint.sh \
         /usr/local/bin/suitecrm-cron.sh \
-    && echo "ServerName localhost" > /etc/apache2/conf-available/servername.conf \
+    && echo 'ServerName localhost' \
+        > /etc/apache2/conf-available/servername.conf \
     && a2enconf servername \
-    && printf "Listen 8080\n" > /etc/apache2/ports.conf
+    && printf 'Listen 8080\n' > /etc/apache2/ports.conf
 
 WORKDIR /var/www/html
 
 EXPOSE 8080
 
+HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=5 \
+    CMD curl -fsS http://127.0.0.1:8080/index.php >/dev/null || exit 1
+
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+
+CMD ["apache2-foreground"]
