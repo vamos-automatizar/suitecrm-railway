@@ -6,7 +6,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     APACHE_DOCUMENT_ROOT=/var/www/html
 
 # ============================================================
-# System dependencies + PHP extensions
+# System dependencies and PHP extensions
 # ============================================================
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -26,17 +26,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libkrb5-dev \
         libonig-dev \
     \
-    # GD
     && docker-php-ext-configure gd \
         --with-freetype \
         --with-jpeg \
     \
-    # IMAP
     && docker-php-ext-configure imap \
         --with-kerberos \
         --with-imap-ssl \
     \
-    # PHP extensions required by SuiteCRM
     && docker-php-ext-install -j"$(nproc)" \
         curl \
         gd \
@@ -51,27 +48,32 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     \
     # ========================================================
     # Apache MPM
-    #
-    # PHP is loaded through mod_php, so use prefork.
-    # Disable other MPMs to avoid:
-    # "More than one MPM loaded"
     # ========================================================
     && a2dismod mpm_event 2>/dev/null || true \
     && a2dismod mpm_worker 2>/dev/null || true \
     && a2dismod mpm_prefork 2>/dev/null || true \
+    \
+    # Remove possible MPM module configuration files explicitly.
+    && rm -f /etc/apache2/mods-enabled/mpm_event.conf \
+            /etc/apache2/mods-enabled/mpm_event.load \
+            /etc/apache2/mods-enabled/mpm_worker.conf \
+            /etc/apache2/mods-enabled/mpm_worker.load \
+            /etc/apache2/mods-enabled/mpm_prefork.conf \
+            /etc/apache2/mods-enabled/mpm_prefork.load \
+    \
+    # Enable exactly one MPM.
     && a2enmod mpm_prefork \
     \
-    # Apache modules required by SuiteCRM
+    # SuiteCRM Apache modules.
     && a2enmod rewrite \
         headers \
         expires \
     \
-    # Apache basic configuration
     && echo 'ServerName localhost' \
         > /etc/apache2/conf-available/servername.conf \
     && a2enconf servername \
     \
-    # Railway uses the container port configured here.
+    # Railway HTTP port.
     && printf 'Listen 8080\n' > /etc/apache2/ports.conf \
     \
     && rm -rf /var/lib/apt/lists/*
@@ -83,7 +85,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
 
 # ============================================================
-# Download official SuiteCRM 7.15.2 source
+# Download official SuiteCRM source
 # ============================================================
 
 WORKDIR /opt
@@ -113,7 +115,7 @@ RUN curl -fsSL \
         /opt/suitecrm/tests
 
 # ============================================================
-# SuiteCRM / Apache / PHP configuration
+# Configuration files
 # ============================================================
 
 COPY php.ini \
@@ -133,34 +135,29 @@ RUN chmod +x \
         /usr/local/bin/suitecrm-cron.sh
 
 # ============================================================
-# Verify Apache MPM configuration during image build
-# Expected output:
-#   mpm_prefork_module (shared)
+# Apache validation
 # ============================================================
 
 RUN echo "============================================" \
-    && echo "SuiteCRM Docker image" \
     && echo "SuiteCRM version: ${SUITECRM_VERSION}" \
     && echo "PHP version:" \
     && php -v \
-    && echo "Apache MPM configuration:" \
-    && apache2ctl -M | grep mpm \
+    && echo "Enabled Apache MPM modules:" \
+    && apache2ctl -M 2>&1 | grep -E 'mpm_(event|worker|prefork)_module' || true \
+    && echo "Apache configuration test:" \
+    && apache2ctl -t \
     && echo "============================================"
 
 # ============================================================
-# Application directory
+# Application
 # ============================================================
 
 WORKDIR /var/www/html
 
-# ============================================================
-# Expose Railway application port
-# ============================================================
-
 EXPOSE 8080
 
 # ============================================================
-# Container healthcheck
+# Healthcheck
 # ============================================================
 
 HEALTHCHECK \
@@ -173,7 +170,7 @@ HEALTHCHECK \
         >/dev/null || exit 1
 
 # ============================================================
-# Entrypoint
+# Startup
 # ============================================================
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
