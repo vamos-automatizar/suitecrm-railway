@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+echo "=========================================="
+echo "SUITECRM ENTRYPOINT V4"
+echo "BUILD SOURCE: vamos-automatizar/suitecrm-railway"
+echo "DATE: 2026-09-08"
+echo "=========================================="
+
 APP_DIR="/var/www/html"
 SEED_DIR="/opt/suitecrm"
 MARKER="${APP_DIR}/.suitecrm-seeded"
@@ -9,9 +15,6 @@ echo "[suitecrm] Entrypoint started."
 
 mkdir -p "${APP_DIR}"
 
-# Railway mounts the persistent volume over /var/www/html.
-# On the first startup, copy the application from the image
-# into the persistent volume.
 if [[ ! -f "${MARKER}" ]]; then
 
     echo "[suitecrm] First initialization detected."
@@ -29,8 +32,8 @@ else
     echo "[suitecrm] Existing SuiteCRM installation detected."
 fi
 
-# Ensure SuiteCRM can write to the directories required
-# by the application and installer.
+echo "[suitecrm] Fixing permissions..."
+
 chown -R www-data:www-data "${APP_DIR}"
 
 chmod -R 755 "${APP_DIR}"
@@ -48,7 +51,6 @@ do
     fi
 done
 
-# config.php is created/updated by the SuiteCRM installer.
 if [[ ! -f "${APP_DIR}/config.php" ]]; then
     touch "${APP_DIR}/config.php"
 fi
