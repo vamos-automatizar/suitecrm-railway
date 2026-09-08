@@ -1,6 +1,18 @@
 # SuiteCRM 7.15.2 for Railway
 
-Self-hosted SuiteCRM 7.15.2 deployment prepared for Railway using the official SuiteCRM source release, PHP 8.4, Apache 2.4, and MySQL 8.4.
+Deploy **SuiteCRM 7.15.2** on Railway using the official SuiteCRM source release, PHP 8.4, Apache 2.4, MySQL 8.4, persistent storage, and an automated scheduler.
+
+SuiteCRM is an open-source CRM platform for sales, marketing, customer service, reporting, workflow automation, and customer relationship management.
+
+## About Hosting
+
+This repository provides a Railway-ready deployment of SuiteCRM 7.15.2 built from the official SuiteCRM source release.
+
+The application runs on PHP 8.4 and Apache 2.4 and connects to a MySQL 8.4 service through Railway private networking.
+
+Persistent storage is used for the SuiteCRM application and database so that configuration, uploaded files, customizations, and CRM data survive container restarts and redeployments.
+
+The deployment also includes an automated background scheduler that runs SuiteCRM's `cron.php` every minute.
 
 ## Architecture
 
@@ -9,145 +21,234 @@ Self-hosted SuiteCRM 7.15.2 deployment prepared for Railway using the official S
 - **Web server:** Apache 2.4
 - **Database:** MySQL 8.4
 - **Container port:** 8080
-- **Scheduler:** SuiteCRM `cron.php` executed every minute
-- **Persistent application volume:** `/var/www/html`
-- **Persistent database volume:** `/var/lib/mysql`
+- **Scheduler:** SuiteCRM `cron.php` every minute
+- **SuiteCRM volume:** `/var/www/html`
+- **MySQL volume:** `/var/lib/mysql`
 
-SuiteCRM 7.15.x officially supports PHP 8.1–8.4, Apache 2.4, and MySQL 8.0/8.4. SuiteCRM 7.15.2 is the current 7.x release. See the official compatibility matrix and release notes for details.
+SuiteCRM 7.15.x officially supports PHP 8.1–8.4, Apache 2.4, and MySQL 8.0/8.4.
 
-## Deploy on Railway
+## Common Use Cases
 
-Create a Railway project from this repository and add:
+- **Sales CRM** — Manage leads, contacts, accounts, opportunities, quotes, and contracts.
+- **Marketing Automation** — Run campaigns, manage target lists, and track marketing activities.
+- **Customer Service** — Manage cases, activities, support requests, and customer history.
+- **Workflow Automation** — Automate CRM processes, notifications, assignments, and updates.
+- **Business Integrations** — Connect SuiteCRM with APIs, webhooks, n8n, Activepieces, and other automation platforms.
 
-1. A **SuiteCRM** service from this GitHub repository.
-2. A **MySQL** service using `mysql:8.4`.
-3. A persistent volume for SuiteCRM mounted at `/var/www/html`.
-4. A persistent volume for MySQL mounted at `/var/lib/mysql`.
-5. A public domain for the SuiteCRM service.
+## Dependencies for SuiteCRM Hosting
 
-Railway reference variables should be used for the database connection so users do not have to copy credentials manually.
+This deployment uses the following supporting services and components.
 
-## Recommended Railway Variables
+### Deployment Dependencies
 
-Set the following variables on the SuiteCRM service:
+- PHP 8.4
+- Apache 2.4
+- MySQL 8.4
+- Railway persistent volumes
+- SuiteCRM scheduler (`cron.php`)
+
+### Railway Services
+
+The Railway project should contain:
+
+1. A **SuiteCRM** service using this GitHub repository.
+2. A **MySQL** service.
+3. A persistent Volume attached to SuiteCRM at `/var/www/html`.
+4. A persistent Volume attached to MySQL at `/var/lib/mysql`.
+5. Public HTTP networking for the SuiteCRM service.
+
+Railway reference variables allow the SuiteCRM service to use the MySQL service's connection information without hardcoding database credentials.
+
+## Railway Variables
+
+Set the following variables on the **SuiteCRM service**:
 
 ```env
 PORT=8080
+
 DB_HOST=${{MySQL.MYSQLHOST}}
 DB_PORT=${{MySQL.MYSQLPORT}}
 DB_NAME=${{MySQL.MYSQLDATABASE}}
 DB_USER=${{MySQL.MYSQLUSER}}
 DB_PASSWORD=${{MySQL.MYSQLPASSWORD}}
+
 SITE_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}
 ```
 
-The current Docker image uses the official SuiteCRM web installer for the initial database/site configuration. The `DB_*` and `SITE_URL` variables are provided as deployment references and should be entered into the installer when requested.
+These variables provide the database connection values that should be used during the SuiteCRM web installation.
+
+> **Important:** These variables do not automatically complete the SuiteCRM web installer. During the first access, you must manually enter their resolved values in the SuiteCRM installation wizard.
+
+Railway supports reference variables using the `${{SERVICE_NAME.VARIABLE_NAME}}` syntax.
 
 ## First Access
 
-After the services are running:
+After deploying the services:
 
-1. Open the Railway public URL.
-2. The SuiteCRM installation wizard should appear if the persistent volume is empty.
-3. Accept the AGPL license.
-4. Complete the system requirements check.
-5. Configure the database using the Railway-provided MySQL reference values.
-6. Set your SuiteCRM administrator username and password.
-7. Set the site URL to the Railway public URL.
-8. Finish the installation and sign in.
+1. Wait for the SuiteCRM and MySQL services to start.
+2. Open the public URL of the **SuiteCRM service**.
+3. SuiteCRM will display the web installation wizard on the first installation.
+4. Open the **Variables** tab of the **SuiteCRM service** in Railway.
+5. Use the configured database variable values when completing the installer.
+6. Configure the SuiteCRM administrator account.
+7. Complete the installation.
+8. Sign in with the administrator credentials you created.
 
-### Database values
+### Database Configuration
 
-Use these values during the installer:
+In the SuiteCRM installer, select **MySQL** and enter the values from the **SuiteCRM service Variables**.
 
-| SuiteCRM field | Railway value |
+| SuiteCRM field | SuiteCRM service variable |
 |---|---|
 | Database Type | MySQL |
-| Host Name | `${{MySQL.MYSQLHOST}}` |
-| Database Name | `${{MySQL.MYSQLDATABASE}}` |
-| User Name | `${{MySQL.MYSQLUSER}}` |
-| Password | `${{MySQL.MYSQLPASSWORD}}` |
-| Port | `${{MySQL.MYSQLPORT}}` |
+| Host Name | `DB_HOST` |
+| Database Name | `DB_NAME` |
+| User Name | `DB_USER` |
+| Password | `DB_PASSWORD` |
+| Port | `DB_PORT` |
+
+> **Important:** Copy the actual values displayed in the **Variables** section of the **SuiteCRM service**. Do not enter the literal `${{...}}` expressions into the SuiteCRM installer.
+
+### Identify Administration User
+
+In the **Site Configuration** section, configure the initial SuiteCRM administrator:
+
+- **SuiteCRM Application Admin Name** — Your administrator username.
+- **SuiteCRM Admin User Password** — A strong administrator password.
+- **Re-enter SuiteCRM Admin User Password** — Confirm the password.
+- **URL of SuiteCRM Instance** — Your public Railway SuiteCRM URL.
+- **Email Address** — Your administrator email address.
+
+The administrator account created during installation will be used to access the SuiteCRM administration interface.
+
+### Installation Checklist
+
+Before completing the installer, make sure:
+
+- Database values were copied from the **SuiteCRM service Variables**.
+- MySQL host, database name, username, and password are correct.
+- The administrator username and password are defined.
+- The public Railway URL is configured as the SuiteCRM instance URL.
+- A valid administrator email address is provided.
+
+> **Important:** The Railway deployment does **not** automatically complete the SuiteCRM web installer. Database and administrator settings must be configured manually during the first access.
 
 ## Scheduled Tasks
 
-SuiteCRM requires its scheduler to run for features such as **Workflows, Emails, and Schedulers**.
+SuiteCRM relies on scheduled tasks for functionality such as **Workflows, Emails, and Schedulers**.
 
-This container automatically executes:
+This deployment automatically runs:
 
 ```bash
 php -f cron.php
 ```
 
-every minute in the background, matching the cadence recommended in the official SuiteCRM installation documentation.
+every minute in the background using the `www-data` user.
+
+This follows the standard SuiteCRM approach of executing `cron.php` every minute.
 
 ## Persistence
 
 ### SuiteCRM
 
-Mount the Railway volume at:
+The SuiteCRM service uses a persistent Railway Volume mounted at:
 
 ```text
 /var/www/html
 ```
 
-This preserves the installed SuiteCRM instance, configuration, customizations, uploads, cache, and application data across container redeployments.
+This preserves the installed application, configuration, customizations, uploads, cache, and other application data across redeployments.
 
 ### MySQL
 
-Mount the database volume at:
+The MySQL service should use a persistent Volume mounted at:
 
 ```text
 /var/lib/mysql
 ```
 
-Never remove the MySQL volume unless you intentionally want to destroy the database.
+This preserves the CRM database across container restarts and redeployments.
+
+> **Warning:** Removing the MySQL volume can permanently destroy your SuiteCRM database.
 
 ## Updating SuiteCRM
 
-The application version is intentionally pinned to **7.15.2**. Avoid using `latest` for a public Railway template.
+The application version is intentionally pinned to **7.15.2** rather than using `latest`.
 
-Before upgrading a deployed instance:
+This provides predictable builds and helps avoid unexpected changes in a public Railway template.
+
+Before upgrading an existing installation:
 
 1. Back up the MySQL database.
-2. Back up the SuiteCRM volume.
-3. Review the official SuiteCRM upgrade guide.
-4. Test the target release separately.
-5. Upgrade the application only after confirming compatibility.
+2. Back up the SuiteCRM Volume.
+3. Review the official SuiteCRM upgrade documentation.
+4. Test the target version separately.
+5. Upgrade only after confirming compatibility.
 
-The Dockerfile downloads the SuiteCRM source from the official GitHub release tag rather than relying on a third-party SuiteCRM container image.
+The Dockerfile downloads the SuiteCRM source from the official GitHub release tag instead of depending on a third-party SuiteCRM container image.
 
 ## Requirements
 
 SuiteCRM 7.15.x officially supports:
 
-- PHP 8.1, 8.2, 8.3, 8.4
-- Apache 2.4
-- MySQL 8.0 and 8.4
+- **PHP:** 8.1, 8.2, 8.3, 8.4
+- **Apache:** 2.4
+- **MySQL:** 8.0, 8.4
 
-This image uses PHP 8.4 and Apache 2.4.
+This deployment uses:
 
-SuiteCRM 7.15.0 also raised the minimum PHP version to 8.1 and added PHP 8.4 support. PHP 8.4 no longer bundles the IMAP extension, so this image installs IMAP explicitly.
+- **PHP 8.4**
+- **Apache 2.4**
+- **MySQL 8.4**
+
+SuiteCRM 7.15 introduced PHP 8.4 support. Because PHP 8.4 no longer bundles the IMAP extension, this image installs the required IMAP extension explicitly.
+
+## Why Deploy SuiteCRM on Railway?
+
+Railway provides a straightforward way to deploy the complete SuiteCRM stack without manually configuring a traditional server.
+
+With this template, you can run SuiteCRM together with MySQL, persistent storage, private service-to-service networking, and scheduled background tasks.
+
+This makes Railway suitable for self-hosted CRM projects that need flexibility, automation, customization, and control over their deployment environment.
 
 ## Security Notes
 
 - Use a strong SuiteCRM administrator password.
-- Do not commit `.env` files or database credentials.
-- Keep the Railway MySQL volume persistent.
-- Keep the SuiteCRM version pinned and update deliberately.
-- Review SuiteCRM security releases before upgrading.
+- Never commit database passwords or other secrets to Git.
+- Keep database and application volumes persistent.
+- Keep SuiteCRM pinned to a specific release.
+- Review official SuiteCRM security releases before upgrading.
+- Do not expose the MySQL service publicly unless external database access is explicitly required.
+
+## Source and Build
+
+The Docker image is built from the official SuiteCRM source repository and release tag:
+
+```text
+https://github.com/SuiteCRM/SuiteCRM
+```
+
+The application version is controlled in the Dockerfile using:
+
+```dockerfile
+ARG SUITECRM_VERSION=7.15.2
+```
+
+This keeps the deployment reproducible and avoids relying on third-party SuiteCRM images.
 
 ## Official Resources
 
 - [SuiteCRM](https://suitecrm.com/)
 - [SuiteCRM GitHub](https://github.com/SuiteCRM/SuiteCRM)
 - [SuiteCRM 7 Installation Guide](https://docs.suitecrm.com/admin/installation-guide/downloading-installing/)
-- [SuiteCRM 7 Compatibility Matrix](https://docs.suitecrm.com/admin/compatibility-matrix/)
+- [SuiteCRM Compatibility Matrix](https://docs.suitecrm.com/admin/compatibility-matrix/)
 - [SuiteCRM 7.15.x Release Notes](https://docs.suitecrm.com/admin/releases/7.15.x/)
 - [Railway Templates](https://docs.railway.com/templates/create)
+- [Railway Variables](https://docs.railway.com/variables)
+- [Railway Volumes](https://docs.railway.com/volumes)
 
 ## License
 
-SuiteCRM source code is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**.
+SuiteCRM is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**.
 
-This repository contains deployment/build files intended to build a Railway-compatible container from the official SuiteCRM source release.
+This repository contains deployment and build configuration intended to create a Railway-compatible SuiteCRM environment from the official SuiteCRM source release.
