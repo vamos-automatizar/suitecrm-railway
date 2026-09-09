@@ -6,9 +6,9 @@ APP_DIR="/var/www/html"
 SEED_DIR="/opt/suitecrm"
 
 echo "=========================================="
-echo "SUITECRM ENTRYPOINT V7"
+echo "SUITECRM ENTRYPOINT V8"
 echo "BUILD SOURCE: vamos-automatizar/suitecrm-railway"
-echo "DATE: 2026-09-08"
+echo "DATE: 2026-09-09"
 echo "=========================================="
 
 echo "[suitecrm] Entrypoint started."
@@ -101,39 +101,63 @@ fi
 echo "[suitecrm] SuiteCRM index.php detected."
 
 # ------------------------------------------------------------
-# 4. TEMP DIRECTORY
+# 4. PHP TEMPORARY DIRECTORY
 # ------------------------------------------------------------
 
-echo "[suitecrm] Checking PHP temporary directory..."
+echo "[suitecrm] Configuring PHP temporary directory..."
+
+# Keep PHP temporary files on the same persistent filesystem
+# as SuiteCRM cache files.
+mkdir -p "${APP_DIR}/tmp"
+
+echo "[suitecrm] Fixing temporary directory ownership..."
+
+chown -R www-data:www-data "${APP_DIR}/tmp"
+
+# Writable by owner and group.
+chmod 775 "${APP_DIR}/tmp"
+
+echo "[suitecrm] PHP temporary directory:"
+ls -ld "${APP_DIR}/tmp"
+
+# ------------------------------------------------------------
+# 5. SYSTEM /tmp
+# ------------------------------------------------------------
+
+# Keep the system temporary directory usable as well.
+# PHP should use ${APP_DIR}/tmp because of sys_temp_dir.
+
+echo "[suitecrm] Checking system /tmp..."
 
 mkdir -p /tmp
-
-# Standard permissions for a shared temporary directory.
 chmod 1777 /tmp
 
-echo "[suitecrm] /tmp permissions:"
+echo "[suitecrm] System /tmp:"
 ls -ld /tmp
 
 # ------------------------------------------------------------
-# 5. FILE OWNERSHIP AND PERMISSIONS
+# 6. FILE OWNERSHIP AND PERMISSIONS
 # ------------------------------------------------------------
 
-echo "[suitecrm] Fixing permissions..."
+echo "[suitecrm] Fixing SuiteCRM permissions..."
 
-# SuiteCRM must be owned by the Apache/PHP user.
+# SuiteCRM application must be owned by Apache/PHP.
 chown -R www-data:www-data "${APP_DIR}"
 
 # Default permissions:
 # directories = 755
 # files       = 644
-
 find "${APP_DIR}" -type d -exec chmod 755 {} \;
 find "${APP_DIR}" -type f -exec chmod 644 {} \;
 
-# SuiteCRM runtime directories must be writable.
-#
-# These directories are used for cache generation,
-# customizations, uploads, metadata, and runtime files.
+# Restore the temporary directory permissions after
+# applying the default application permissions.
+chown -R www-data:www-data "${APP_DIR}/tmp"
+chmod 775 "${APP_DIR}/tmp"
+
+# ------------------------------------------------------------
+# 7. SUITECRM WRITABLE DIRECTORIES
+# ------------------------------------------------------------
 
 for DIR in \
     cache \
@@ -160,7 +184,7 @@ do
 done
 
 # ------------------------------------------------------------
-# 6. CONFIGURATION FILE
+# 8. CONFIGURATION FILE
 # ------------------------------------------------------------
 
 # Do not create config.php automatically.
@@ -181,7 +205,64 @@ else
 fi
 
 # ------------------------------------------------------------
-# 7. CACHE DIRECTORY VALIDATION
+# 9. PHP TEMP DIRECTORY VALIDATION
+# ------------------------------------------------------------
+
+echo "[suitecrm] Checking PHP sys_temp_dir..."
+
+PHP_TEMP_DIR="$(php -r 'echo sys_get_temp_dir();')"
+
+echo "[suitecrm] PHP reports temporary directory:"
+echo "           ${PHP_TEMP_DIR}"
+
+if [[ "${PHP_TEMP_DIR}" != "${APP_DIR}/tmp" ]]; then
+
+    echo "[suitecrm] ERROR: PHP is not using the SuiteCRM persistent temp directory."
+    echo "[suitecrm] Expected: ${APP_DIR}/tmp"
+    echo "[suitecrm] Actual:   ${PHP_TEMP_DIR}"
+
+    exit 1
+
+fi
+
+echo "[suitecrm] PHP sys_temp_dir configuration: OK"
+
+# ------------------------------------------------------------
+# 10. PHP TEMP FILE TEST
+# ------------------------------------------------------------
+
+echo "[suitecrm] Testing PHP temporary file creation..."
+
+TEMP_TEST="$(su -s /bin/sh www-data -c \
+    'php -r "echo tempnam(sys_get_temp_dir(), \"suitecrm\");"')"
+
+echo "[suitecrm] PHP temp test:"
+echo "           ${TEMP_TEST}"
+
+if [[ "${TEMP_TEST}" != "${APP_DIR}/tmp/"* ]]; then
+
+    echo "[suitecrm] ERROR: PHP temporary file was not created inside ${APP_DIR}/tmp."
+
+    rm -f "${TEMP_TEST}" 2>/dev/null || true
+
+    exit 1
+
+fi
+
+if [[ ! -f "${TEMP_TEST}" ]]; then
+
+    echo "[suitecrm] ERROR: PHP temporary file does not exist."
+
+    exit 1
+
+fi
+
+rm -f "${TEMP_TEST}"
+
+echo "[suitecrm] PHP temporary file test: OK"
+
+# ------------------------------------------------------------
+# 11. CACHE WRITE TEST
 # ------------------------------------------------------------
 
 echo "[suitecrm] Validating SuiteCRM cache directory..."
@@ -189,10 +270,8 @@ echo "[suitecrm] Validating SuiteCRM cache directory..."
 mkdir -p "${APP_DIR}/cache"
 
 chown -R www-data:www-data "${APP_DIR}/cache"
-
 chmod -R 775 "${APP_DIR}/cache"
 
-# Test write access as the actual Apache/PHP user.
 CACHE_TEST_DIR="${APP_DIR}/cache/.railway-write-test"
 
 rm -rf "${CACHE_TEST_DIR}"
@@ -216,7 +295,7 @@ else
 fi
 
 # ------------------------------------------------------------
-# 8. TEST SUITECRM CACHE MODULE DIRECTORY
+# 12. CACHE MODULES WRITE TEST
 # ------------------------------------------------------------
 
 echo "[suitecrm] Validating cache/modules directory..."
@@ -224,7 +303,6 @@ echo "[suitecrm] Validating cache/modules directory..."
 mkdir -p "${APP_DIR}/cache/modules"
 
 chown -R www-data:www-data "${APP_DIR}/cache/modules"
-
 chmod -R 775 "${APP_DIR}/cache/modules"
 
 CACHE_MODULE_TEST_DIR="${APP_DIR}/cache/modules/.railway-write-test"
@@ -250,7 +328,7 @@ else
 fi
 
 # ------------------------------------------------------------
-# 9. SUITECRM CRON
+# 13. SUITECRM CRON
 # ------------------------------------------------------------
 
 echo "[suitecrm] Starting SuiteCRM scheduler..."
@@ -268,7 +346,7 @@ else
 fi
 
 # ------------------------------------------------------------
-# 10. APACHE CONFIGURATION VALIDATION
+# 14. APACHE CONFIGURATION VALIDATION
 # ------------------------------------------------------------
 
 echo "[suitecrm] Validating Apache configuration..."
@@ -282,7 +360,7 @@ apache2ctl -M 2>&1 \
     || true
 
 # ------------------------------------------------------------
-# 11. FINAL SUITECRM VALIDATION
+# 15. FINAL SUITECRM VALIDATION
 # ------------------------------------------------------------
 
 echo "[suitecrm] Final SuiteCRM validation..."
@@ -292,6 +370,15 @@ ls -ld "${APP_DIR}"
 
 echo "[suitecrm] index.php:"
 ls -lah "${APP_DIR}/index.php"
+
+echo "[suitecrm] PHP temp directory:"
+ls -ld "${APP_DIR}/tmp"
+
+echo "[suitecrm] SuiteCRM cache:"
+ls -ld "${APP_DIR}/cache"
+
+echo "[suitecrm] SuiteCRM cache/modules:"
+ls -ld "${APP_DIR}/cache/modules"
 
 if [[ -f "${APP_DIR}/config.php" ]]; then
 
@@ -304,14 +391,8 @@ else
 
 fi
 
-echo "[suitecrm] cache:"
-ls -ld "${APP_DIR}/cache"
-
-echo "[suitecrm] cache/modules:"
-ls -ld "${APP_DIR}/cache/modules"
-
 # ------------------------------------------------------------
-# 12. START APACHE
+# 16. START APACHE
 # ------------------------------------------------------------
 
 echo "[suitecrm] Starting Apache..."
